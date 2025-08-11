@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>武道大会</title>
+    <style>
+        /* 保留原有样式不变 */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #111; color: #fff; padding: 10px; height: 100vh; overflow: hidden; }
+        .container { max-width: 500px; margin: 0 auto; display: flex; flex-direction: column; height: 100%; }
+        header { text-align: center; padding: 10px 0; margin-bottom: 10px; }
+        h1 { font-size: 1.5rem; color: #ff9900; }
+        .player { background: #222; border: 1px solid #444; border-radius: 8px; padding: 10px; margin: 5px 0; }
+        .stats { display: flex; justify-content: space-around; padding: 5px; font-size: 0.9rem; }
+        .value { font-size: 1.5rem; font-weight: bold; color: #0cf; }
+        .actions { display: flex; gap: 5px; margin-top: 10px; }
+        .btn { flex: 1; padding: 8px; border: none; border-radius: 5px; font-size: 0.9rem; cursor: pointer; }
+        .gather { background: #093; color: white; }
+        .defend { background: #369; color: white; }
+        .attack { background: #c33; color: white; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .ai-action { padding: 8px; text-align: center; font-size: 0.9rem; margin-top: 5px; color: #ff69b4; }
+        .log { background: #000; border: 1px solid #333; border-radius: 8px; padding: 10px; flex: 1; overflow-y: auto; margin: 10px 0; font-size: 0.8rem; }
+        .msg { padding: 3px 0; }
+        .status-bar { display: flex; justify-content: space-between; padding: 0 5px; margin: 5px 0; font-size: 0.9rem; }
+        .game-over { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; padding: 20px; }
+        .result-box { background: #222; border-radius: 8px; padding: 20px; width: 100%; max-width: 300px; text-align: center; border: 1px solid #444; }
+        .result-title { font-size: 1.5rem; color: #ff9900; margin-bottom: 10px; }
+        .result-message { font-size: 1rem; margin: 10px 0; }
+        .restart-btn { background: #ff9900; color: white; border: none; padding: 8px 20px; font-size: 1rem; border-radius: 5px; cursor: pointer; margin-top: 10px; }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); } 20%, 40%, 60%, 80% { transform: translateX(5px); } }
+        .shake { animation: shake 0.4s ease; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>武道大会</h1>
+        </header>
+        
+        <!-- AI Player -->
+        <div class="player" id="ai-player">
+            <div class="stats">
+                <div>内力: <span class="value" id="ai-chi">0</span></div>
+                <div>守势: <span class="value" id="ai-defense">0</span></div>
+            </div>
+            <div class="ai-action" id="ai-action">静观其变...</div>
+        </div>
+        
+        <!-- Player Controls -->
+        <div class="player" id="player">
+            <div class="stats">
+                <div>内力: <span class="value" id="player-chi">0</span></div>
+                <div>守势: <span class="value" id="player-defense">0</span></div>
+            </div>
+            
+            <div class="actions">
+                <button class="btn gather" id="gather-btn">聚气</button>
+                <button class="btn defend" id="defend-btn">守御</button>
+                <button class="btn attack" id="attack-btn">出招</button>
+            </div>
+        </div>
+        
+        <!-- Game Status -->
+        <div class="status-bar">
+            <div>回合: <span id="round">1</span></div>
+            <div>状态: <span id="status">请出招</span></div>
+        </div>
+        
+        <!-- Game Log -->
+        <div class="log" id="log">
+            <div class="msg">武林大会开始！双方凝神聚气，准备对决！</div>
+        </div>
+    </div>
+    
+    <!-- Game Over Screen -->
+    <div class="game-over" id="game-over" style="display:none">
+        <div class="result-box">
+            <div class="result-title" id="result-title">胜负已分</div>
+            <div class="result-message" id="result-message"></div>
+            <button class="restart-btn" id="restart-btn">再战江湖</button>
+        </div>
+    </div>
+
+    <script>
+        // 武侠风日志描述库
+        const logDescriptions = {
+            gameStart: ["武林大会开始！双方凝神聚气，准备对决！", "江湖对决拉开帷幕，双方蓄势待发！"],
+            gather: [
+                "运功聚气，内力渐增",
+                "丹田运转，真气凝聚",
+                "吐纳调息，功力提升",
+                "气沉丹田，内力渐长"
+            ],
+            defend: [
+                "摆出守御架势，固若金汤",
+                "护体真气流转，守势渐成",
+                "稳扎马步，防御滴水不漏",
+                "以守为攻，静待时机"
+            ],
+            attack: [
+                "雷霆一击，内力迸发",
+                "招式凌厉，直取要害",
+                "内力贯注，攻势如虹",
+                "真气外放，威力惊人"
+            ],
+            attackFail: [
+                "内力不济，招式难成",
+                "真气涣散，攻势未果",
+                "力有不逮，出招受阻",
+                "内力枯竭，无法发招"
+            ],
+            clash: [
+                "双方同时出招，内力相撞，平分秋色",
+                "招式对碰，真气激荡，难分高下",
+                "内力交锋，气浪翻涌，不分伯仲",
+                "硬碰硬的对决，双方各退一步"
+            ],
+            win: [
+                "雷霆一击正中要害，对手应声倒地",
+                "内力贯注，一招制敌，对手溃不成军",
+                "抓住破绽，致命一击，对手无力回天",
+                "真气如虹，贯穿对手防御，奠定胜局"
+            ],
+            lose: [
+                "聚气之时被对手雷霆一击，内力尽散",
+                "防御未成，被对手抓住破绽，一败涂地",
+                "内力运转之际，被对手突袭得手",
+                "守势被破，对手致命一击无力抵挡"
+            ]
+        };
+
+        // 游戏状态
+        const gameState = {
+            round: 1,
+            player: { chi: 0, defense: 0, lastAction: '' },
+            ai: { chi: 0, defense: 0, lastAction: '' },
+            gameOver: false
+        };
+        
+        // DOM元素
+        const ui = {
+            playerChi: document.getElementById('player-chi'),
+            playerDefense: document.getElementById('player-defense'),
+            aiChi: document.getElementById('ai-chi'),
+            aiDefense: document.getElementById('ai-defense'),
+            aiAction: document.getElementById('ai-action'),
+            gatherBtn: document.getElementById('gather-btn'),
+            defendBtn: document.getElementById('defend-btn'),
+            attackBtn: document.getElementById('attack-btn'),
+            round: document.getElementById('round'),
+            log: document.getElementById('log'),
+            status: document.getElementById('status'),
+            gameOver: document.getElementById('game-over'),
+            resultTitle: document.getElementById('result-title'),
+            resultMessage: document.getElementById('result-message'),
+            restartBtn: document.getElementById('restart-btn'),
+            container: document.querySelector('.container')
+        };
+        
+        // 初始化游戏
+        function initGame() {
+            gameState.round = 1;
+            gameState.player = { chi: 0, defense: 0, lastAction: '' };
+            gameState.ai = { chi: 0, defense: 0, lastAction: '' };
+            gameState.gameOver = false;
+            
+            updateUI();
+            addLog(getRandomLog("gameStart"));
+            ui.status.textContent = "请出招";
+            
+            // 重置UI
+            ui.gameOver.style.display = "none";
+            ui.aiAction.textContent = "静观其变...";
+            
+            // 移除旧的事件监听器
+            ui.gatherBtn.removeEventListener('click', gatherHandler);
+            ui.defendBtn.removeEventListener('click', defendHandler);
+            ui.attackBtn.removeEventListener('click', attackHandler);
+            ui.restartBtn.removeEventListener('click', initGame);
+            
+            // 添加新的事件监听器
+            ui.gatherBtn.addEventListener('click', gatherHandler);
+            ui.defendBtn.addEventListener('click', defendHandler);
+            ui.attackBtn.addEventListener('click', attackHandler);
+            ui.restartBtn.addEventListener('click', initGame);
+        }
+        
+        // 获取随机日志
+        function getRandomLog(type) {
+            const logs = logDescriptions[type];
+            return logs[Math.floor(Math.random() * logs.length)];
+        }
+        
+        // 事件处理函数
+        function gatherHandler() { playRound('gather'); }
+        function defendHandler() { playRound('defend'); }
+        function attackHandler() { playRound('attack'); }
+        
+        // 更新UI
+        function updateUI() {
+            ui.playerChi.textContent = gameState.player.chi;
+            ui.playerDefense.textContent = gameState.player.defense;
+            ui.aiChi.textContent = gameState.ai.chi;
+            ui.aiDefense.textContent = gameState.ai.defense;
+            ui.round.textContent = gameState.round;
+            
+            // 更新按钮状态
+            ui.defendBtn.disabled = gameState.player.defense >= 2;
+            ui.attackBtn.disabled = gameState.player.chi < 1;
+        }
+        
+        // 添加日志消息
+        function addLog(message) {
+            const msg = document.createElement('div');
+            msg.className = 'msg';
+            msg.textContent = `[第${gameState.round}回合] ${message}`;
+            ui.log.appendChild(msg);
+            ui.log.scrollTop = ui.log.scrollHeight;
+        }
+        
+        // 触发震动效果
+        function triggerShake() {
+            ui.container.classList.add('shake');
+            setTimeout(() => {
+                ui.container.classList.remove('shake');
+            }, 400);
+        }
+        
+        // AI决策函数 - 智能策略
+        function aiDecision() {
+            // 开局固定攒气
+            if (gameState.round === 1) return 'gather';
+            
+            const pChi = gameState.player.chi;
+            const pDefense = gameState.player.defense;
+            const aChi = gameState.ai.chi;
+            const aDefense = gameState.ai.defense;
+
+        // 斩杀代码：对手气力为0且防御链为2，AI有气力则必攻击
+       if (pChi === 0 && pDefense === 2 && aChi >= 1) {
+           return 'attack';
+       }
+
+       if (pChi === 0 && pDefense === 1 && aChi >= 2) {
+           return 'attack';
+       }
+
+       if (pChi === 0 && pDefense === 0 && aChi >= 3) {
+           return 'attack';
+       }
+            
+       // 安全时优先攒气
+       if (pChi === 0){
+            if (aChi >= 1){
+               return  Math.random() < 0.4 ? 'attack':'gather';
+            } else{
+                 return 'gather'
+            }
+       }
+
+
+        // 当AI气力为0时，不会选择攻击（因为内力不足），而是在聚气和防御之间选择
+        if (aChi === 0) {
+            // 防御未满2层，可以选择防御
+            if (aDefense < 2) {
+                return Math.random() < 0.7 ? 'gather' : 'defend';
+            } else {
+                return 'gather';
+            }
+        }
+
+            
+            // 防御链达到2时，若对手有气则大概率攻击刷盾
+            if (aDefense === 2 && pChi > 0 && aChi >= 1) {
+                return Math.random() < 0.8 ? 'attack':'gather';
+            }
+            
+            // 心理博弈 - 当对手连续攒气时，高概率攻击
+            if (gameState.player.lastAction === 'gather' && 
+                gameState.player.defense === 0 &&
+                aChi >= 1) {
+                if (Math.random() < 0.8) return 'attack';
+            }
+            
+            // 防止偷鸡 - 当AI气力高时，有小概率防御迷惑对手
+            if (aChi >= 2 && Math.random() < 0.3 && aDefense < 2) {
+                return 'defend';
+            }
+            
+            // 当对手无法防御时高概率攻击
+            if (pDefense === 2 && aChi >= 1) {
+                if (Math.random() < 0.9) return 'attack';
+            }
+            
+            // 根据气力调整策略
+            const rand = Math.random();
+            
+            // 气多时（>=2）更大概率攻击
+            if (aChi >= 2) {
+                if (rand < 0.75) return 'attack';
+                if (rand < 0.9) return 'gather';
+                return aDefense < 2 ? 'defend' : 'gather';
+            }
+            
+            // 气少时（<=1）更大概率防御，有小概率偷鸡攻击
+            if (aChi <= 1) {
+                if (rand < 0.15 && aChi >= 1) return 'attack'; // 偷鸡
+                if (rand < 0.65 && aDefense < 2) return 'defend';
+                return 'gather';
+            }
+            
+            // 默认行为
+            if (aChi >= 1 && rand < 0.5) return 'attack';
+            return 'gather';
+        }
+        
+        // 执行游戏回合
+        function playRound(playerAction) {
+            if (gameState.gameOver) return;
+            
+            // 禁用按钮防止重复点击
+            ui.defendBtn.disabled = true;
+            ui.attackBtn.disabled = true;
+            ui.status.textContent = "对手思量中...";
+            
+            // 记录玩家最后动作
+            gameState.player.lastAction = playerAction;
+            
+            // 显示玩家动作
+            addLog(`你${getActionName(playerAction)}：${getRandomLog(playerAction)}`);
+            
+            // 短暂延迟后AI决策
+            setTimeout(() => {
+                const aiAction = aiDecision();
+                gameState.ai.lastAction = aiAction;
+                ui.aiAction.textContent = getActionName(aiAction);
+                addLog(`对手${getActionName(aiAction)}：${getRandomLog(aiAction)}`);
+                
+                // 处理结果
+                setTimeout(() => {
+                    processActions(playerAction, aiAction);
+                }, 100);
+            }, 300);
+        }
+        
+        // 处理回合结果
+        function processActions(playerAction, aiAction) {
+            let result = null;
+            let resultMessage = "";
+            
+            // 玩家攒气时被AI攻击
+            if (playerAction === 'gather' && aiAction === 'attack') {
+                triggerShake();
+                setTimeout(() => {
+                    result = "lose";
+                    resultMessage = getRandomLog("lose");
+                    endGame(result, resultMessage);
+                }, 100);
+                return;
+            }
+            
+            // 玩家攻击AI攒气
+            if (playerAction === 'attack' && aiAction === 'gather') {
+                triggerShake();
+                setTimeout(() => {
+                    result = "win";
+                    resultMessage = getRandomLog("win");
+                    endGame(result, resultMessage);
+                }, 100);
+                return;
+            }
+            
+            // 双方攻击相互抵消
+            if (playerAction === 'attack' && aiAction === 'attack') {
+                triggerShake();
+                if (gameState.player.chi >= 1 && gameState.ai.chi >= 1) {
+                    gameState.player.chi--;
+                    gameState.ai.chi--;
+                    
+                    // 修复点：攻击时无论气力多少都重置防御链
+                    gameState.player.defense = 0;
+                    gameState.ai.defense = 0;
+                    
+                    addLog(getRandomLog("clash"));
+                } else {
+                    // 攻击无效
+                    if (gameState.player.chi < 1) {
+                        addLog(getRandomLog("attackFail"));
+                    }
+                    if (gameState.ai.chi < 1) {
+                        addLog(`对手${getRandomLog("attackFail")}`);
+                    }
+                }
+            } else {
+                // 执行玩家行动
+                executeAction('player', playerAction);
+                
+                // 执行AI行动
+                executeAction('ai', aiAction);
+            }
+            
+            // 继续游戏
+            gameState.round++;
+            updateUI();
+            ui.status.textContent = "请出招";
+            
+            // 重新启用按钮
+            ui.defendBtn.disabled = gameState.player.defense >= 2;
+            ui.attackBtn.disabled = gameState.player.chi < 1;
+        }
+        
+        // 执行行动
+        function executeAction(target, action) {
+            const state = target === 'player' ? gameState.player : gameState.ai;
+            
+            switch (action) {
+                case 'gather':
+                    state.chi++;
+                    state.defense = 0;  // 修复点：每次行动都重置防御链（如规则）
+                    break;
+                    
+                case 'defend':
+                    if (state.defense < 2) {
+                        state.defense++;
+                    }
+                    break;
+                    
+                case 'attack':
+                    if (state.chi >= 1) {
+                        state.chi--;
+                    }
+                    state.defense = 0;  // 修复点：出招必须重置防御链
+                    break;
+            }
+        }
+        
+        // 结束游戏
+        function endGame(result, message) {
+            gameState.gameOver = true;
+            
+            setTimeout(() => {
+                ui.resultTitle.textContent = result === "win" ? "胜者为王！" : "败走江湖！";
+                ui.resultMessage.textContent = message;
+                ui.gameOver.style.display = "flex";
+                
+                // 添加游戏结束日志
+                addLog(message);
+            }, 500);
+        }
+        
+        // 获取行动名称
+        function getActionName(action) {
+            return action === 'gather' ? "聚气" :
+                   action === 'defend' ? "守御" : "出招";
+        }
+        
+        // 初始化游戏
+        initGame();
+    </script>
+</body>
+</html>
